@@ -14,9 +14,8 @@ namespace SqlServerEFSample
         {
             return this.FirstName + " " + this.LastName;
         }
-        public override string ToString()
-        {
-            return "User [id=" + this.UserId + ", name=" + this.GetFullName() + "]";
-        }
+
+        public object AsLogEntry() => new { UserId, Name=GetFullName() };
+        public override string ToString() => AsLogEntry().ToString();
     }
 }

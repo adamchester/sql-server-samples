@@ -10,9 +10,7 @@ namespace SqlServerEFSample
         public bool IsComplete { get; set; }
         public virtual User AssignedTo { get; set; }
 
-        public override string ToString()
-        {
-            return "Task [id=" + this.TaskId + ", title=" + this.Title + ", dueDate=" + this.DueDate.ToString() + ", IsComplete=" + this.IsComplete + "]";
-        }
+        public object AsLogEntry() => new { TaskId, Title, DueDate };
+        public override string ToString() => AsLogEntry().ToString();
     }
 }

@@ -2,100 +2,114 @@ using System;
 using System.Linq;
 using System.Data.SqlClient;
 using System.Collections.Generic;
+using System.Globalization;
+
+using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+
+using Serilog;
+using Serilog.Extensions;
+using SerilogTimings.Extensions;
 
 namespace SqlServerEFSample
 {
     class Program
     {
+        static readonly string ConnectionString = new SqlConnectionStringBuilder {
+            DataSource = "192.168.99.100", UserID = "sa",
+            Password = "yourStrong(!)Password",
+            InitialCatalog = "EFSampleDB",
+        }.ConnectionString;
+
         static void Main(string[] args)
         {
-            Console.WriteLine("** C# CRUD sample with Entity Framework Core and SQL Server **\n");
+            var log = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .WriteTo.LiterateConsole()
+                .Destructure.ByTransforming<User>(u => u.AsLogEntry())
+                .Destructure.ByTransforming<Task>(t => t.AsLogEntry())
+                .CreateLogger();
+
+            var loggerFactory = new LoggerFactory().AddSerilog(log, dispose: false);
+
+            log.Information("** C# CRUD sample with Entity Framework Core and SQL Server **");
+
             try
             {
-                // Build connection string
-                SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder();
-                builder.DataSource = "localhost";   // update me
-                builder.UserID = "sa";              // update me
-                builder.Password = "your_password";      // update me
-                builder.InitialCatalog = "EFSampleDB";
+                var options = new DbContextOptionsBuilder()
+                    .UseSqlServer(ConnectionString)
+                    .EnableSensitiveDataLogging()
+                    //.UseLoggerFactory(loggerFactory)
+                    .Options;
 
-                using (EFSampleContext context = new EFSampleContext(builder.ConnectionString))
+                using (EFSampleContext context = new EFSampleContext(options))
                 {
-                    context.Database.EnsureDeleted();
-                    context.Database.EnsureCreated();
-                    Console.WriteLine("Created database schema from C# classes.");
+                    using (log.TimeOperation("Deleting database"))
+                        context.Database.EnsureDeleted();
+                    
+                    using (log.TimeOperation("Creating database"))
+                        context.Database.EnsureCreated();
 
                     // Create demo: Create a User instance and save it to the database
                     User newUser = new User { FirstName = "Anna", LastName = "Shrestinian" };
                     context.Users.Add(newUser);
                     context.SaveChanges();
-                    Console.WriteLine("\nCreated User: " + newUser.ToString());
+                    log.Information("Created {@User}", newUser);
 
                     // Create demo: Create a Task instance and save it to the database
-                    Task newTask = new Task() { Title = "Ship Helsinki", IsComplete = false, DueDate = DateTime.Parse("04-01-2017") };
+                    Task newTask = new Task() { Title = "Ship Helsinki", IsComplete = false, DueDate = DateTime.Parse("01-APR-2017") };
                     context.Tasks.Add(newTask);
                     context.SaveChanges();
-                    Console.WriteLine("\nCreated Task: " + newTask.ToString());
+                    log.Information("Created {@Task}", newTask);
 
                     // Association demo: Assign task to user
                     newTask.AssignedTo = newUser;
                     context.SaveChanges();
-                    Console.WriteLine("\nAssigned Task: '" + newTask.Title + "' to user '" + newUser.GetFullName());
+                    log.Information("Assigned Task: {TaskTitle} to user {UserFullName}",
+                        newTask.Title, newUser.GetFullName());
 
                     // Read demo: find incomplete tasks assigned to user 'Anna'
-                    Console.WriteLine("\nIncomplete tasks assigned to 'Anna':");
+                    const string firstNameEqualsCriteria = "Anna";
                     var query = from t in context.Tasks
                                 where t.IsComplete == false &&
-                                t.AssignedTo.FirstName.Equals("Anna")
+                                    t.AssignedTo.FirstName == firstNameEqualsCriteria
                                 select t;
-                    foreach(var t in query)
-                    {
-                        Console.WriteLine(t.ToString());
-                    }
+                    log.Information(
+                        "Incomplete tasks assigned to {FirstNameEquals} are {@Tasks}",
+                        firstNameEqualsCriteria, query);
 
                     // Update demo: change the 'dueDate' of a task
                     Task taskToUpdate = context.Tasks.First(); // get the first task
-                    Console.WriteLine("\nUpdating task: " + taskToUpdate.ToString());
-                    taskToUpdate.DueDate = DateTime.Parse("06-30-2016");
+                    log.Information("Updating {@TaskToUpdate}", taskToUpdate);
+                    taskToUpdate.DueDate = DateTime.Parse("30-JUN-2016");
                     context.SaveChanges();
-                    Console.WriteLine("dueDate changed: " + taskToUpdate.ToString());
+                    log.Information("{FieldName} changed {@TaskToUpdate}",
+                        "dueDate", taskToUpdate);
 
                     // Delete demo: delete all tasks with a dueDate in 2016
-                    Console.WriteLine("\nDeleting all tasks with a dueDate in 2016");
-                    DateTime dueDate2016 = DateTime.Parse("12-31-2016");
+                    log.Information("Deleting all tasks with a dueDate in 2016");
+                    DateTime dueDate2016 = DateTime.Parse("01-JAN-2017");
                     query = from t in context.Tasks
                             where t.DueDate < dueDate2016
                             select t;
                     foreach(Task t in query)
                     {
-                        Console.WriteLine("Deleting task: " + t.ToString());
+                        log.Information("Deleting {@Task}", t);
                         context.Tasks.Remove(t);
                     }
                     context.SaveChanges();
 
                     // Show tasks after the 'Delete' operation - there should be 0 tasks
-                    Console.WriteLine("\nTasks after delete:");
                     List<Task> tasksAfterDelete = (from t in context.Tasks select t).ToList<Task>();
-                    if (tasksAfterDelete.Count == 0)
-                    {
-                        Console.WriteLine("[None]");
-                    }
-                    else
-                    {
-                        foreach (Task t in query)
-                        {
-                            Console.WriteLine(t.ToString());
-                        }
-                    }
+                    log.Information("Tasks after delete are {@Tasks}", tasksAfterDelete);
                 }
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                log.Error(e, "Failed");
             }
 
-            Console.WriteLine("All done. Press any key to finish...");
-            Console.ReadKey(true);
+            log.Information("All done");
         }
     }
 }
